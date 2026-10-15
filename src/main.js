@@ -118,22 +118,20 @@ function startApp() {
               <input id="manual-code" type="text" autocomplete="off" placeholder="Pega el texto del QR" />
               <button class="button button-secondary" type="submit">Verificar</button>
             </form>
-          </section>
-
-          <section class="panel result-card" aria-live="polite" aria-atomic="true">
-            <div class="card-heading">
-              <div><span class="step">02</span><h2>Resultado</h2></div>
-            </div>
-            <div id="result" class="result-empty">
-              <span class="result-icon" aria-hidden="true">✓</span>
-              <h3>Listo para verificar</h3>
-              <p>El resultado aparecerá aquí después de leer el código.</p>
-            </div>
-            <button id="retry" class="button button-primary retry-button" type="button" hidden>Reintentar registro</button>
-            <div class="rule-note"><strong>Importante</strong><span>Si la conexión falla, el ingreso no se autoriza. Vuelve a intentar cuando se restablezca.</span></div>
+            <button id="retry" class="button button-secondary retry-button" type="button" hidden>Reintentar registro pendiente</button>
           </section>
         </div>
       </section>
+      <dialog id="result-dialog" class="result-dialog" aria-label="Resultado de verificación">
+        <div class="result-dialog-content">
+          <div id="result" class="result-empty" aria-live="polite" aria-atomic="true">
+            <span class="result-icon" aria-hidden="true">✓</span>
+            <h3>Listo para verificar</h3>
+            <p>El resultado aparecerá aquí después de leer el código.</p>
+          </div>
+          <button id="close-result" class="button button-primary result-close" type="button">Cerrar</button>
+        </div>
+      </dialog>
       <dialog id="approval-dialog" class="approval-dialog" aria-labelledby="approval-title" aria-describedby="approval-instructions">
         <div class="approval-content">
           <span class="approval-icon" aria-hidden="true">⌗</span>
@@ -164,11 +162,14 @@ function startApp() {
   const torchToggle = document.querySelector('#torch-toggle');
   const cameraHint = document.querySelector('#camera-hint');
   const retryButton = document.querySelector('#retry');
+  const resultDialog = document.querySelector('#result-dialog');
+  const closeResultButton = document.querySelector('#close-result');
   const approvalDialog = document.querySelector('#approval-dialog');
   const approvalCode = document.querySelector('#approval-code');
   const approveEntryButton = document.querySelector('#approve-entry');
   let approvalCandidate = '';
   let resumeCameraAfterCancel = false;
+  let resumeCameraAfterResult = false;
 
   function readPending() {
     try {
@@ -195,14 +196,15 @@ function startApp() {
     if (online && pending) submitPending();
   }
 
-  function showMessage(status, title, body, details = '') {
+  function showMessage(status, title, body, details = '', openDialog = true) {
     resultBox.className = `result-content status-${status}`;
     resultBox.innerHTML = `
       <div class="status-icon" aria-hidden="true">${status === 'accepted' ? '✓' : status === 'duplicate' ? '!' : status === 'invalid' ? '×' : '…'}</div>
       <p class="status-label">${status === 'accepted' ? 'Ingreso autorizado' : status === 'duplicate' ? 'Ingreso ya registrado' : status === 'invalid' ? 'Código no válido' : 'No se pudo confirmar'}</p>
-      <h3>${escapeHtml(title)}</h3>
+      <h3 id="result-title">${escapeHtml(title)}</h3>
       <p>${escapeHtml(body)}</p>
       ${details ? `<div class="ticket-detail">${escapeHtml(details)}</div>` : ''}`;
+    if (openDialog && !resultDialog.open) resultDialog.showModal();
   }
 
   function escapeHtml(value) {
@@ -235,7 +237,8 @@ function startApp() {
     }
 
     retryButton.disabled = true;
-    showMessage('waiting', 'Verificando…', 'Consultando el registro central de invitaciones.');
+    retryButton.hidden = true;
+    showMessage('waiting', 'Verificando…', 'Consultando el registro central de invitaciones.', '', false);
     const intent = pending;
     const { data, error } = await supabase.rpc('registrar_ingreso', {
       p_contenido_qr: intent.code,
@@ -311,6 +314,7 @@ function startApp() {
     if (!approvalCandidate || pending) return;
     const code = approvalCandidate;
     approvalCandidate = '';
+    resumeCameraAfterResult = resumeCameraAfterCancel;
     resumeCameraAfterCancel = false;
     approvalDialog.close();
     try {
@@ -319,6 +323,14 @@ function startApp() {
       console.warn('El dispositivo no permitió vibrar.', error);
     }
     await handleCode(code);
+  }
+
+  function closeResult() {
+    if (resultDialog.open) resultDialog.close();
+    const shouldResumeCamera = resumeCameraAfterResult && !pending;
+    resumeCameraAfterResult = false;
+    if (shouldResumeCamera) startCamera();
+    else if (!pending) startCameraButton.focus();
   }
 
   async function startCamera() {
@@ -535,6 +547,11 @@ function startApp() {
   torchToggle.addEventListener('click', toggleTorch);
   approveEntryButton.addEventListener('click', approveEntry);
   document.querySelector('#cancel-approval').addEventListener('click', cancelApproval);
+  closeResultButton.addEventListener('click', closeResult);
+  resultDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeResult();
+  });
   approvalDialog.addEventListener('cancel', (event) => {
     event.preventDefault();
     cancelApproval();
