@@ -1,4 +1,4 @@
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import { BrowserQRCodeReader } from '@zxing/browser';
 import { createClient } from '@supabase/supabase-js';
 import './style.css';
 
@@ -24,7 +24,10 @@ function startApp() {
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: true, autoRefreshToken: true },
   });
-  const scanner = new BrowserMultiFormatReader();
+  const scanner = new BrowserQRCodeReader(undefined, {
+    delayBetweenScanAttempts: 200,
+    delayBetweenScanSuccess: 300,
+  });
   let cameraControls = null;
   let pending = readPending();
 
@@ -242,7 +245,16 @@ function startApp() {
     startCameraButton.disabled = true;
     startCameraButton.textContent = 'Solicitando cámara…';
     try {
-      cameraControls = await scanner.decodeFromVideoDevice(undefined, video, (result) => {
+      cameraControls = await scanner.decodeFromConstraints({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
+          focusMode: { ideal: 'continuous' },
+        },
+      }, video, (result) => {
         if (result && !pending) handleCode(result.getText());
       });
       videoPlaceholder.hidden = true;
