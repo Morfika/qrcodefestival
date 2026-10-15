@@ -169,7 +169,6 @@ function startApp() {
   const approveEntryButton = document.querySelector('#approve-entry');
   let approvalCandidate = '';
   let resumeCameraAfterCancel = false;
-  let resumeCameraAfterResult = false;
 
   function readPending() {
     try {
@@ -314,7 +313,6 @@ function startApp() {
     if (!approvalCandidate || pending) return;
     const code = approvalCandidate;
     approvalCandidate = '';
-    resumeCameraAfterResult = resumeCameraAfterCancel;
     resumeCameraAfterCancel = false;
     approvalDialog.close();
     try {
@@ -327,10 +325,7 @@ function startApp() {
 
   function closeResult() {
     if (resultDialog.open) resultDialog.close();
-    const shouldResumeCamera = resumeCameraAfterResult && !pending;
-    resumeCameraAfterResult = false;
-    if (shouldResumeCamera) startCamera();
-    else if (!pending) startCameraButton.focus();
+    if (!pending) startCameraButton.focus();
   }
 
   async function startCamera() {
