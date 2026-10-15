@@ -81,6 +81,12 @@ button { cursor: pointer; }
 .scan-frame::after { top: -2px; right: -2px; border-width: 3px 3px 0 0; border-radius: 0 8px 0 0; }
 .scan-frame i::before { bottom: -2px; left: -2px; border-width: 0 0 3px 3px; border-radius: 0 0 0 8px; }
 .scan-frame i::after { right: -2px; bottom: -2px; border-width: 0 3px 3px 0; border-radius: 0 0 8px; }
+.camera-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 11px; }
+.camera-tools label { display: flex; flex-direction: column; gap: 5px; color: #627387; font-size: 10px; font-weight: 600; }
+.camera-tools select { min-width: 150px; max-width: 100%; padding: 8px 10px; border: 1px solid #dce3eb; border-radius: 8px; background: #fff; color: #1b324f; font: inherit; }
+.zoom-control { flex: 1; min-width: 120px; }
+.zoom-control input { width: 100%; accent-color: #245985; }
+.camera-tools .button { min-height: 34px; padding: 0 11px; font-size: 11px; }
 .scanner-card > .button-primary { width: 100%; margin-top: 13px; }
 .hint { margin: 9px 0 0; color: #8794a2; font-size: 10px; line-height: 1.5; }
 .divider { display: flex; align-items: center; gap: 10px; margin: 19px 0 13px; color: #8995a2; font-size: 10px; }

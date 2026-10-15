@@ -1,4 +1,5 @@
 import { BrowserQRCodeReader } from '@zxing/browser';
+import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { createClient } from '@supabase/supabase-js';
 import './style.css';
 
@@ -24,11 +25,19 @@ function startApp() {
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { persistSession: true, autoRefreshToken: true },
   });
-  const scanner = new BrowserQRCodeReader(undefined, {
-    delayBetweenScanAttempts: 200,
-    delayBetweenScanSuccess: 300,
+  const scanHints = new Map([
+    [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]],
+    [DecodeHintType.TRY_HARDER, true],
+  ]);
+  const scanner = new BrowserQRCodeReader(scanHints, {
+    delayBetweenScanAttempts: 150,
+    delayBetweenScanSuccess: 250,
   });
   let cameraControls = null;
+  let cameraSessionId = 0;
+  let nativeDetector = null;
+  let torchEnabled = false;
+  let selectedCameraId = '';
   let pending = readPending();
 
   app.innerHTML = `
@@ -91,8 +100,18 @@ function startApp() {
               </div>
               <div class="scan-frame" aria-hidden="true"><i></i></div>
             </div>
+            <div id="camera-tools" class="camera-tools" hidden>
+              <label id="camera-picker-wrap" hidden>
+                Cámara
+                <select id="camera-picker" aria-label="Seleccionar cámara"></select>
+              </label>
+              <label id="zoom-wrap" class="zoom-control" hidden>
+                Zoom <input id="camera-zoom" type="range" min="1" max="1" step="0.1" value="1" />
+              </label>
+              <button id="torch-toggle" class="button button-quiet" type="button" hidden>Encender linterna</button>
+            </div>
             <button id="start-camera" class="button button-primary" type="button">Activar cámara</button>
-            <p class="hint">La cámara requiere permiso del navegador y una conexión HTTPS (o localhost).</p>
+            <p id="camera-hint" class="hint">Enfoca el QR completo y mantén el teléfono quieto. La cámara requiere HTTPS.</p>
             <div class="divider"><span>o escribe el código manualmente</span></div>
             <form id="manual-form" class="manual-form">
               <label class="visually-hidden" for="manual-code">Código de invitación</label>
@@ -126,6 +145,13 @@ function startApp() {
   const video = document.querySelector('#video');
   const videoPlaceholder = document.querySelector('#video-placeholder');
   const startCameraButton = document.querySelector('#start-camera');
+  const cameraTools = document.querySelector('#camera-tools');
+  const cameraPickerWrap = document.querySelector('#camera-picker-wrap');
+  const cameraPicker = document.querySelector('#camera-picker');
+  const zoomWrap = document.querySelector('#zoom-wrap');
+  const cameraZoom = document.querySelector('#camera-zoom');
+  const torchToggle = document.querySelector('#torch-toggle');
+  const cameraHint = document.querySelector('#camera-hint');
   const retryButton = document.querySelector('#retry');
 
   function readPending() {
@@ -244,30 +270,196 @@ function startApp() {
   async function startCamera() {
     startCameraButton.disabled = true;
     startCameraButton.textContent = 'Solicitando cámara…';
+    cameraHint.textContent = 'Enfoca el QR completo y mantén el teléfono quieto. La cámara requiere HTTPS.';
     try {
-      cameraControls = await scanner.decodeFromConstraints({
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
-          focusMode: { ideal: 'continuous' },
-        },
-      }, video, (result) => {
-        if (result && !pending) handleCode(result.getText());
+      const videoConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 60 },
+      };
+      if (selectedCameraId) videoConstraints.deviceId = { exact: selectedCameraId };
+      else videoConstraints.facingMode = { ideal: 'environment' };
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
+      } catch (error) {
+        if (error.name !== 'OverconstrainedError' && error.name !== 'NotFoundError') throw error;
+        selectedCameraId = '';
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' } },
+        });
+      }
+
+      const sessionId = ++cameraSessionId;
+      let detectedBeforeReady = '';
+      cameraControls = await scanner.decodeFromStream(stream, video, (result) => {
+        if (!result || pending) return;
+        if (cameraControls) handleCode(result.getText());
+        else detectedBeforeReady = result.getText();
       });
+      const track = stream.getVideoTracks()[0];
+      await configureCamera(track);
+      await populateCameraPicker(track);
+      configureCameraTools(track);
+      startNativeScan(sessionId);
       videoPlaceholder.hidden = true;
       startCameraButton.textContent = 'Cámara activa · detener';
       startCameraButton.disabled = false;
+      if (detectedBeforeReady && !pending) handleCode(detectedBeforeReady);
     } catch (error) {
+      stopCamera();
       startCameraButton.disabled = false;
       startCameraButton.textContent = 'Activar cámara';
       showMessage('invalid', 'No se pudo abrir la cámara', 'Permite el acceso a la cámara y vuelve a intentarlo.', error.message);
     }
   }
 
+  async function configureCamera(track) {
+    if (!track?.applyConstraints) return;
+    const capabilities = getCameraCapabilities(track);
+    const advanced = [];
+    for (const [name, preferred] of [
+      ['focusMode', 'continuous'],
+      ['exposureMode', 'continuous'],
+      ['whiteBalanceMode', 'continuous'],
+    ]) {
+      if (Array.isArray(capabilities[name]) && capabilities[name].includes(preferred)) {
+        advanced.push({ [name]: preferred });
+      }
+    }
+    if (!advanced.length) return;
+    try {
+      await track.applyConstraints({ advanced });
+    } catch (error) {
+      console.warn('No se pudieron activar los ajustes automáticos de cámara.', error);
+    }
+  }
+
+  async function populateCameraPicker(activeTrack) {
+    if (!navigator.mediaDevices.enumerateDevices) return;
+    let devices;
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch (error) {
+      console.warn('No se pudieron listar las cámaras disponibles.', error);
+      cameraPickerWrap.hidden = true;
+      return;
+    }
+    const cameras = devices.filter((device) => device.kind === 'videoinput');
+    cameraPicker.replaceChildren();
+    for (const [index, camera] of cameras.entries()) {
+      const option = document.createElement('option');
+      option.value = camera.deviceId;
+      option.textContent = camera.label || `Cámara ${index + 1}`;
+      cameraPicker.append(option);
+    }
+    const activeDeviceId = getCameraSettings(activeTrack).deviceId;
+    if (activeDeviceId && cameras.some((camera) => camera.deviceId === activeDeviceId)) {
+      selectedCameraId = activeDeviceId;
+      cameraPicker.value = activeDeviceId;
+    }
+    cameraPickerWrap.hidden = cameras.length < 2;
+  }
+
+  function configureCameraTools(track) {
+    const capabilities = getCameraCapabilities(track);
+    const zoom = capabilities.zoom;
+    if (zoom && zoom.max > zoom.min) {
+      const currentZoom = getCameraSettings(track).zoom;
+      cameraZoom.min = String(zoom.min);
+      cameraZoom.max = String(zoom.max);
+      cameraZoom.step = String(Math.max((zoom.max - zoom.min) / 100, 0.1));
+      cameraZoom.value = String(Math.min(Math.max(currentZoom || zoom.min, zoom.min), zoom.max));
+      zoomWrap.hidden = false;
+    } else {
+      zoomWrap.hidden = true;
+    }
+
+    torchEnabled = false;
+    torchToggle.hidden = typeof cameraControls?.switchTorch !== 'function';
+    torchToggle.textContent = 'Encender linterna';
+    cameraTools.hidden = cameraPickerWrap.hidden && zoomWrap.hidden && torchToggle.hidden;
+  }
+
+  function getCameraCapabilities(track) {
+    try {
+      return track.getCapabilities?.() || {};
+    } catch (error) {
+      console.warn('El navegador no permite consultar los ajustes de cámara.', error);
+      return {};
+    }
+  }
+
+  function getCameraSettings(track) {
+    try {
+      return track.getSettings?.() || {};
+    } catch (error) {
+      console.warn('El navegador no permite consultar la configuración de cámara.', error);
+      return {};
+    }
+  }
+
+  function startNativeScan(sessionId) {
+    if (typeof window.BarcodeDetector !== 'function') return;
+    try {
+      nativeDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    } catch (error) {
+      console.warn('El lector QR nativo no está disponible; continúa el lector alternativo.', error);
+      return;
+    }
+
+    let scanning = false;
+    let lastScan = 0;
+    const scanFrame = async (timestamp) => {
+      if (sessionId !== cameraSessionId || !cameraControls || !nativeDetector) return;
+      if (!scanning && timestamp - lastScan >= 120 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        scanning = true;
+        lastScan = timestamp;
+        try {
+          const [result] = await nativeDetector.detect(video);
+          if (result?.rawValue && sessionId === cameraSessionId && !pending) {
+            await handleCode(result.rawValue);
+            return;
+          }
+        } catch (error) {
+          console.warn('El lector QR nativo dejó de estar disponible; continúa el lector alternativo.', error);
+          nativeDetector = null;
+          return;
+        } finally {
+          scanning = false;
+        }
+      }
+      if (sessionId === cameraSessionId && nativeDetector) requestAnimationFrame(scanFrame);
+    };
+    requestAnimationFrame(scanFrame);
+  }
+
+  async function applyZoom() {
+    const track = video.srcObject?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: Number(cameraZoom.value) }] });
+    } catch (error) {
+      cameraHint.textContent = `No se pudo ajustar el zoom: ${error.message}`;
+    }
+  }
+
+  async function toggleTorch() {
+    if (!cameraControls?.switchTorch) return;
+    try {
+      await cameraControls.switchTorch(!torchEnabled);
+      torchEnabled = !torchEnabled;
+      torchToggle.textContent = torchEnabled ? 'Apagar linterna' : 'Encender linterna';
+    } catch (error) {
+      cameraHint.textContent = `No se pudo cambiar la linterna: ${error.message}`;
+    }
+  }
+
   function stopCamera() {
+    cameraSessionId += 1;
+    nativeDetector = null;
     if (cameraControls) {
       cameraControls.stop();
       cameraControls = null;
@@ -275,9 +467,18 @@ function startApp() {
     if (video) {
       video.srcObject?.getTracks().forEach((track) => track.stop());
       videoPlaceholder.hidden = false;
+      cameraTools.hidden = true;
       startCameraButton.textContent = 'Activar cámara';
     }
   }
+
+  cameraPicker.addEventListener('change', () => {
+    selectedCameraId = cameraPicker.value;
+    stopCamera();
+    startCamera();
+  });
+  cameraZoom.addEventListener('input', applyZoom);
+  torchToggle.addEventListener('click', toggleTorch);
 
   async function showSession(session) {
     const signedIn = Boolean(session);

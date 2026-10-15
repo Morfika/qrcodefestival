@@ -48,7 +48,7 @@ Para generar los archivos de publicación:
 npm run build
 ```
 
-Publica el contenido de `dist/` detrás de HTTPS y restringe el acceso al personal autorizado. Para usar la cámara, el navegador requiere HTTPS o `localhost`; también se puede pegar el contenido QR en el campo manual. Un enlace no publicado no sustituye el inicio de sesión.
+Publica el contenido de `dist/` detrás de HTTPS y restringe el acceso al personal autorizado. Para usar la cámara, el navegador requiere HTTPS o `localhost`; también se puede pegar el contenido QR en el campo manual. El lector está optimizado para QR, intenta el enfoque automático continuo y usa lectura nativa del navegador cuando está disponible, además de ZXing en modo de mayor precisión. En teléfonos compatibles aparecen controles para cambiar entre cámaras, ajustar el zoom y encender la linterna. La disponibilidad de esos controles depende del navegador y del hardware. Un enlace no publicado no sustituye el inicio de sesión.
 
 ## Duplicados y conexión inestable
 
