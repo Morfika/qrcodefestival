@@ -115,6 +115,16 @@ button { cursor: pointer; }
 .retry-button { width: 100%; margin-bottom: 14px; }
 .rule-note { display: flex; gap: 10px; padding: 12px; border-radius: 9px; background: #f4f7fa; color: #728193; font-size: 10px; line-height: 1.55; }
 .rule-note strong { flex: 0 0 auto; color: #50657d; }
+.approval-dialog { width: min(92vw, 460px); max-width: none; padding: 0; overflow: visible; border: 0; border-radius: 20px; color: #17283d; box-shadow: 0 24px 80px #10253b55; }
+.approval-dialog::backdrop { background: #10253bb8; backdrop-filter: blur(3px); }
+.approval-content { display: flex; flex-direction: column; align-items: center; padding: 30px 28px 24px; text-align: center; }
+.approval-icon { display: grid; width: 58px; height: 58px; place-items: center; margin-bottom: 15px; border-radius: 18px; background: #eaf2fa; color: #245985; font-size: 35px; }
+.approval-content .eyebrow { margin: 0 0 8px; }
+.approval-content h2 { margin: 0; color: #142f51; font: 800 clamp(22px, 5vw, 28px)/1.15 'Segoe UI', Arial, sans-serif; letter-spacing: -.03em; }
+.approval-content .muted { max-width: 330px; margin: 10px 0 18px; }
+.approval-code { display: block; width: 100%; max-height: 24vh; overflow: auto; padding: 14px; border: 1px solid #dce5ee; border-radius: 10px; background: #f6f9fc; color: #173957; font: 700 16px/1.5 'Consolas', 'Courier New', monospace; overflow-wrap: anywhere; user-select: text; }
+.approval-button { width: 100%; min-height: 64px; margin-top: 20px; border-radius: 12px; font-size: 18px; }
+.cancel-approval { width: 100%; min-height: 50px; margin-top: 8px; }
 footer { padding: 21px 0 26px; color: #98a3af; font-size: 10px; text-align: center; }
 footer span { margin: 0 5px; }
 .setup-message { display: grid; min-height: 100vh; place-items: center; padding: 24px; }

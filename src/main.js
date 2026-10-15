@@ -134,6 +134,17 @@ function startApp() {
           </section>
         </div>
       </section>
+      <dialog id="approval-dialog" class="approval-dialog" aria-labelledby="approval-title" aria-describedby="approval-instructions">
+        <div class="approval-content">
+          <span class="approval-icon" aria-hidden="true">⌗</span>
+          <p class="eyebrow">Código detectado</p>
+          <h2 id="approval-title">¿Autorizar este ingreso?</h2>
+          <p id="approval-instructions" class="muted">Confirma que el código corresponde a la persona que ingresa.</p>
+          <code id="approval-code" class="approval-code"></code>
+          <button id="approve-entry" class="button button-primary approval-button" type="button">Aprobar ingreso</button>
+          <button id="cancel-approval" class="button button-quiet cancel-approval" type="button">Cancelar</button>
+        </div>
+      </dialog>
       <footer>Institución Educativa Integrado de Soacha <span>·</span> Control de acceso</footer>
     </main>`;
 
@@ -153,6 +164,11 @@ function startApp() {
   const torchToggle = document.querySelector('#torch-toggle');
   const cameraHint = document.querySelector('#camera-hint');
   const retryButton = document.querySelector('#retry');
+  const approvalDialog = document.querySelector('#approval-dialog');
+  const approvalCode = document.querySelector('#approval-code');
+  const approveEntryButton = document.querySelector('#approve-entry');
+  let approvalCandidate = '';
+  let resumeCameraAfterCancel = false;
 
   function readPending() {
     try {
@@ -267,6 +283,44 @@ function startApp() {
     await submitPending();
   }
 
+  function requestApproval(rawCode) {
+    const code = rawCode.trim();
+    if (!code || pending || approvalCandidate) return;
+    resumeCameraAfterCancel = Boolean(cameraControls);
+    approvalCandidate = code;
+    approvalCode.textContent = code;
+    stopCamera();
+    approvalDialog.showModal();
+    try {
+      navigator.vibrate?.([180, 80, 180]);
+    } catch (error) {
+      console.warn('El dispositivo no permitió vibrar.', error);
+    }
+    approveEntryButton.focus();
+  }
+
+  function cancelApproval() {
+    if (!approvalCandidate) return;
+    approvalCandidate = '';
+    approvalDialog.close();
+    if (resumeCameraAfterCancel && !pending) startCamera();
+    resumeCameraAfterCancel = false;
+  }
+
+  async function approveEntry() {
+    if (!approvalCandidate || pending) return;
+    const code = approvalCandidate;
+    approvalCandidate = '';
+    resumeCameraAfterCancel = false;
+    approvalDialog.close();
+    try {
+      navigator.vibrate?.(60);
+    } catch (error) {
+      console.warn('El dispositivo no permitió vibrar.', error);
+    }
+    await handleCode(code);
+  }
+
   async function startCamera() {
     startCameraButton.disabled = true;
     startCameraButton.textContent = 'Solicitando cámara…';
@@ -295,8 +349,8 @@ function startApp() {
       const sessionId = ++cameraSessionId;
       let detectedBeforeReady = '';
       cameraControls = await scanner.decodeFromStream(stream, video, (result) => {
-        if (!result || pending) return;
-        if (cameraControls) handleCode(result.getText());
+        if (!result || pending || approvalCandidate) return;
+        if (cameraControls) requestApproval(result.getText());
         else detectedBeforeReady = result.getText();
       });
       const track = stream.getVideoTracks()[0];
@@ -307,7 +361,7 @@ function startApp() {
       videoPlaceholder.hidden = true;
       startCameraButton.textContent = 'Cámara activa · detener';
       startCameraButton.disabled = false;
-      if (detectedBeforeReady && !pending) handleCode(detectedBeforeReady);
+      if (detectedBeforeReady && !pending) requestApproval(detectedBeforeReady);
     } catch (error) {
       stopCamera();
       startCameraButton.disabled = false;
@@ -419,8 +473,8 @@ function startApp() {
         lastScan = timestamp;
         try {
           const [result] = await nativeDetector.detect(video);
-          if (result?.rawValue && sessionId === cameraSessionId && !pending) {
-            await handleCode(result.rawValue);
+          if (result?.rawValue && sessionId === cameraSessionId && !pending && !approvalCandidate) {
+            requestApproval(result.rawValue);
             return;
           }
         } catch (error) {
@@ -479,6 +533,12 @@ function startApp() {
   });
   cameraZoom.addEventListener('input', applyZoom);
   torchToggle.addEventListener('click', toggleTorch);
+  approveEntryButton.addEventListener('click', approveEntry);
+  document.querySelector('#cancel-approval').addEventListener('click', cancelApproval);
+  approvalDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    cancelApproval();
+  });
 
   async function showSession(session) {
     const signedIn = Boolean(session);
@@ -510,7 +570,7 @@ function startApp() {
   document.querySelector('#manual-form').addEventListener('submit', (event) => {
     event.preventDefault();
     const input = document.querySelector('#manual-code');
-    handleCode(input.value);
+    requestApproval(input.value);
     input.value = '';
   });
   startCameraButton.addEventListener('click', () => {
